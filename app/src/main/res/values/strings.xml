@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Arduino Hello World</string>
+    <string name="serial_message_input">serial message</string>
+</resources>
