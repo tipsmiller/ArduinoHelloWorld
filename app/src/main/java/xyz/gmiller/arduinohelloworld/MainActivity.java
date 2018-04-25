@@ -23,17 +23,12 @@ import com.felhr.usbserial.UsbSerialInterface;
 import java.io.UnsupportedEncodingException;
 import java.util.HashMap;
 
-public class MainActivity extends AppCompatActivity {
-    private static final String ACTION_USB_PERMISSION = "xyz.gmiller.arduinohelloworld.USB_PERMISSION";
-    UsbManager usbManager;
-    UsbDevice device;
-    UsbDeviceConnection connection;
-    UsbSerialDevice serialPort;
+public class MainActivity extends AppCompatActivity implements Arduino.ArduinoListener {
     EditText serialText;
     Button beginButton, clearButton, sendButton;
     ScrollView scrollView;
     TextView textView;
-    PendingIntent permissionIntent;
+    Arduino arduino;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,7 +40,6 @@ public class MainActivity extends AppCompatActivity {
         }
 
         setContentView(R.layout.activity_main);
-        usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
 
         serialText = findViewById(R.id.serialText);
         scrollView = findViewById(R.id.scrollView);
@@ -54,14 +48,8 @@ public class MainActivity extends AppCompatActivity {
         sendButton = findViewById(R.id.sendButton);
         textView = findViewById(R.id.textView);
 
-        permissionIntent = PendingIntent.getBroadcast(this, 0, new Intent(ACTION_USB_PERMISSION), 0);
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(ACTION_USB_PERMISSION);
-        filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
-        filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
-        registerReceiver(broadcastReceiver, filter);
-
-        requestPermission();
+        arduino = new Arduino(this, (UsbManager) getSystemService(Context.USB_SERVICE), this);
+        arduino.tryConnect();
     }
 
     @Override
@@ -72,12 +60,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        this.disconnect();
-        try {
-            unregisterReceiver(broadcastReceiver);
-        } catch(IllegalArgumentException ex) {
-            //noop
-        }
+        arduino.destroy();
     }
 
     @Override
@@ -86,94 +69,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void onClickBegin(View view) {
-        requestPermission();
-    }
-
-    private synchronized void requestPermission() {
-        tvAppend(textView, "Looking for devices\n");
-        HashMap<String,UsbDevice> usbDevices = usbManager.getDeviceList();
-        if (!usbDevices.isEmpty()) {
-            if (usbDevices.entrySet().size() == 1) {
-                device = usbDevices.values().iterator().next();
-                tvAppend(textView, String.format("Device found: VID %s, PID %s\n", device.getVendorId(), device.getProductId()));
-                if (usbManager.hasPermission(device)) {
-                    setupArduino();
-                } else {
-                    usbManager.requestPermission(device, permissionIntent);
-                }
-            }
-        }
+        arduino.tryConnect();
     }
 
     public void onClickSend(View view) {
-        if (serialPort != null) {
-            serialPort.write(serialText.getText().toString().getBytes());
+        if (arduino != null) {
+            arduino.sendMessage(serialText.getText().toString());
             serialText.setText("");
         }
     }
 
     public void onClickClear(View view) {
         textView.setText("");
-    }
-
-    private void disconnect() {
-        if (serialPort != null) {
-            tvAppend(textView, "Serial port disconnected\n");
-            serialPort.close();
-            serialPort = null;
-        }
-    }
-
-    private final BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (intent.getAction().equals(ACTION_USB_PERMISSION)) {
-                setupArduino();
-            } else if (intent.getAction().equals(UsbManager.ACTION_USB_DEVICE_ATTACHED)) {
-                tvAppend(textView, "USB device attached\n");
-                if (!intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                    requestPermission();
-                } else {
-                    setupArduino();
-                }
-            } else if (intent.getAction().equals((UsbManager.ACTION_USB_DEVICE_DETACHED))) {
-                tvAppend(textView, "USB device detached\n");
-                disconnect();
-            }
-        }
-    };
-
-    public final UsbSerialInterface.UsbReadCallback mCallback = new UsbSerialInterface.UsbReadCallback() {
-        @Override
-        public void onReceivedData(byte[] bytes) {
-            String data = null;
-            try {
-                data = new String(bytes, "UTF-8");
-                tvAppend(textView, data);
-            } catch (UnsupportedEncodingException ex) {
-                ex.printStackTrace();
-            }
-        }
-    };
-
-    private synchronized void setupArduino() {
-        connection = usbManager.openDevice(device);
-        serialPort = UsbSerialDevice.createUsbSerialDevice(device, connection);
-        if (serialPort != null) {
-            if (serialPort.open()) {
-                serialPort.setBaudRate(9600);
-                serialPort.setDataBits(UsbSerialInterface.DATA_BITS_8);
-                serialPort.setStopBits(UsbSerialInterface.STOP_BITS_1);
-                serialPort.setParity(UsbSerialInterface.PARITY_NONE);
-                serialPort.setFlowControl(UsbSerialInterface.FLOW_CONTROL_OFF);
-                serialPort.read(mCallback);
-                tvAppend(textView, "Success: Serial connection opened!\n");
-            } else {
-                tvAppend(textView, "Error: Serial connection not opened\n");
-            }
-        } else {
-            tvAppend(textView, "Error: Serial port is null\n");
-        }
     }
 
     private void tvAppend(TextView tv, CharSequence text) {
@@ -186,5 +93,10 @@ public class MainActivity extends AppCompatActivity {
                 scrollView.fullScroll(View.FOCUS_DOWN);
             }
         });
+    }
+
+    @Override
+    public void onMessageReceived(String message) {
+        tvAppend(textView, message);
     }
 }
