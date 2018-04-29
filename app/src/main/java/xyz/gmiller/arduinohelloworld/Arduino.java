@@ -119,7 +119,7 @@ public class Arduino {
     }
 
     public void sendMessage(String message) {
-        //noop
+        serialPort.write(message.getBytes());
     }
 
     public void destroy() {
